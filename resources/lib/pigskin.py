@@ -152,87 +152,98 @@ class pigskin(object):
         self.log('User does not have a subscription!')
         raise
 
-    def check_for_subscription(self):
-        """Returns True if a subscription is detected. Raises error_unauthorised on failure."""
-        url = self.config['modules']['API']['USER_PROFILE']
-        headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
-        self.make_request(url, 'get', headers=headers)
 
-        return True
+    # def check_for_subscription(self):
+    #     """Returns True if a subscription is detected. Raises error_unauthorised on failure."""
+    #     url = self.config['modules']['API']['USER_PROFILE']
+        # headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
+    #     self.make_request(url, 'get', headers=headers)
+
+    #     return True
 
     def refresh_tokens(self):
-        """Refreshes authorization tokens."""
-        url = self.config['modules']['API']['LOGIN']
-        post_data = {
-            'refresh_token': self.refresh_token,
-            'client_id': self.client_id,
-            'grant_type': 'refresh_token'
-        }
-        data = self.make_request(url, 'post', payload=post_data)
-        self.access_token = data['access_token']
-        self.refresh_token = data['refresh_token']
-
         return True
+        #  TODO, work out way to do this. Seems we need to register a device etc first.
+
+        # """Refreshes authorization tokens."""
+        # url = self.base_url + '/secure/authenticate'
+        # post_data = {
+        #     'token': self.access_token,
+        #     'format': 'json',
+        #     'accesstoken': 'true'
+        # }
+        # data = self.make_request(url, 'post', payload=post_data)
+        # pdb.set_trace()
+        # self.access_token = data['data']['accessToken']
+
+        # return True
 
     def get_seasons_and_weeks(self):
         """Return a multidimensional array of all seasons and weeks."""
         seasons_and_weeks = {}
+        # https://nflapi.neulion.com/api_nfl/v1/schedule?format=json
 
         try:
-            url = self.config['modules']['ROUTES_DATA_PROVIDERS']['games']
-            seasons = self.make_request(url, 'get')
+            url = 'https://neulion-a.akamaihd.net/nlmobile/nfl/config/nflgp/2017/weeks.json'
+            data = self.make_request(url, 'get')
         except:
             self.log('Acquiring season and week data failed.')
             raise
 
         try:
-            for season in seasons['modules']['mainMenu']['seasonStructureList']:
+            for season in data['seasons']:
                 weeks = []
                 year = str(season['season'])
-                for season_type in season['seasonTypes']:
-                    for week in season_type['weeks']:
-                        week_dict = {
-                            'week_number': str(week['number']),
-                            'week_name': week['weekNameAbbr'],
-                            'season_type': season_type['seasonType']
-                        }
-                        weeks.append(week_dict)
+                for week in season['weeks']:
+                    week_dict = {
+                        'week_number': str(week['value']),
+                        'week_name': week['label'],
+                        'season_type': week['type']
+                    }
+                    weeks.append(week_dict)
 
                 seasons_and_weeks[year] = weeks
         except KeyError:
             self.log('Parsing season and week data failed.')
             raise
-
         return seasons_and_weeks
 
     def get_current_season_and_week(self):
         """Return the current season, season type, and week in a dict."""
         try:
-            url = self.config['modules']['ROUTES_DATA_PROVIDERS']['games']
-            seasons = self.make_request(url, 'get')
+            url = self.api_url + 'v1/schedule?format=json'
+            headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
+            data = self.make_request(url, 'get', headers=headers)
         except:
             self.log('Acquiring season and week data failed.')
             raise
 
         current_s_w = {
-            'season': seasons['modules']['meta']['currentContext']['currentSeason'],
-            'season_type': seasons['modules']['meta']['currentContext']['currentSeasonType'],
-            'week': str(seasons['modules']['meta']['currentContext']['currentWeek'])
+            'season': data['season'],
+            'season_type': data['gameType'],
+            'week': data['week']
         }
 
         return current_s_w
 
     def get_weeks_games(self, season, season_type, week):
         try:
-            url = self.config['modules']['ROUTES_DATA_PROVIDERS']['games_detail'].replace(':seasonType', season_type).replace(':season', season).replace(':week', week)
-            games_data = self.make_request(url, 'get')
-            # collect the games from all keys in 'modules'
-            games = [g for x in games_data['modules'].keys() for g in games_data['modules'][x]['content']]
+            params = {
+                'week': week,
+                'season': season,
+                'gametype': season_type,
+                'format': 'json'
+            }
+            url = self.api_url + 'v1/schedule'
+            headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
+            games_data = self.make_request(url, 'get', params=params, headers=headers)
+            pdb.set_trace()
+            games = games_data['games']
         except:
             self.log('Acquiring games data failed.')
             raise
 
-        return sorted(games, key=lambda x: x['gameDateTimeUtc'])
+        return sorted(games, key=lambda x: x['dateTimeGMT'])
 
     def has_coaches_tape(self, game_id, season):
         """Return whether coaches tape is available for a given game."""
@@ -263,47 +274,20 @@ class pigskin(object):
         """Return the URL for a stream."""
         self.refresh_tokens()
 
-        if video_id == 'nfl_network':
-            diva_config_url = self.config['modules']['DIVA']['HTML5']['SETTINGS']['Live24x7']
-            url = self.config['modules']['ROUTES_DATA_PROVIDERS']['network']
-            response = self.make_request(url, 'get')
-            video_id = response['modules']['networkLiveVideo']['content'][0]['videoId']
-        else:
-            if game_type == 'live':
-                diva_config_url = self.config['modules']['DIVA']['HTML5']['SETTINGS']['LiveNoData']
-            else:
-                diva_config_url = self.config['modules']['DIVA']['HTML5']['SETTINGS']['VodNoData']
-
-        diva_config_data = self.make_request(diva_config_url.replace('device', 'html5'), 'get')
-        diva_config_root = ET.fromstring(diva_config_data)
-        for i in diva_config_root.iter('parameter'):
-            if i.attrib['name'] == 'processingUrlCallPath':
-                processing_url = i.attrib['value']
-            elif i.attrib['name'] == 'videoDataPath':
-                stream_request_url = i.attrib['value'].replace('{V.ID}', video_id)
-        akamai_xml_data = self.make_request(stream_request_url, 'get')
-        akamai_xml_root = ET.fromstring(akamai_xml_data)
-        for i in akamai_xml_root.iter('videoSource'):
-            if i.attrib['format'] == 'ChromeCast':
-                for text in i.itertext():
-                    if 'http' in text:
-                        m3u8_url = text
-                        break
-
         post_data = {
-            'Type': '1',
-            'User': '',
-            'VideoId': video_id,
-            'VideoSource': m3u8_url,
-            'VideoKind': 'Video',
-            'AssetState': '3',
-            'PlayerType': 'HTML5',
-            'other': '{0}|{1}|web|{1}|undefined|{2}' .format(str(uuid.uuid4()), self.access_token, self.user_agent, username)
+            'id': video_id,
+            'gs': 3,
+            'gt': 1,
+            'type': 'game',
+            'format': 'json'
         }
 
-        response = self.make_request(processing_url, 'post', payload=json.dumps(post_data))
-
-        return self.parse_m3u8_manifest(response['ContentUrl'])
+        # https://gamepass.nfl.com/service/publishpoint
+        url = self.api_url + 'v1/publishpoint'
+        headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
+        response = self.make_request(url, 'post', payload=post_data, headers=headers)
+        pdb.set_trace()
+        return self.parse_m3u8_manifest(response['path'])
 
     def parse_m3u8_manifest(self, manifest_url):
         """Return the manifest URL along with its bitrate."""
@@ -316,37 +300,38 @@ class pigskin(object):
         streams['bitrates'] = {}
         m3u8_manifest = self.make_request(manifest_url, 'get')
         m3u8_obj = m3u8.loads(m3u8_manifest)
+        pdb.set_trace()
         for playlist in m3u8_obj.playlists:
             bitrate = int(playlist.stream_info.bandwidth) / 1000
             streams['bitrates'][bitrate] = manifest_url[:manifest_url.rfind('/manifest') + 1] + playlist.uri + '?' + manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
 
         return streams
 
-    def redzone_on_air(self):
-        """Return whether RedZone Live is currently broadcasting."""
-        url = self.config['modules']['ROUTES_DATA_PROVIDERS']['redzone']
-        response = self.make_request(url, 'get')
-        if not response['modules']['redZoneLive']['content']:
-            return False
-        else:
-            return True
+    # def redzone_on_air(self):
+    #     """Return whether RedZone Live is currently broadcasting."""
+    #     url = self.config['modules']['ROUTES_DATA_PROVIDERS']['redzone']
+    #     response = self.make_request(url, 'get')
+    #     if not response['modules']['redZoneLive']['content']:
+    #         return False
+    #     else:
+    #         return True
 
-    def parse_shows(self):
-        """Dynamically parse the NFL Network shows into a dict."""
-        show_dict = {}
-        url = self.config['modules']['API']['NETWORK_PROGRAMS']
-        response = self.make_request(url, 'get')
+    # def parse_shows(self):
+    #     """Dynamically parse the NFL Network shows into a dict."""
+    #     show_dict = {}
+    #     url = self.config['modules']['API']['NETWORK_PROGRAMS']
+    #     response = self.make_request(url, 'get')
 
-        for show in response['modules']['programs']:
-            season_dict = {}
-            for season in show['seasons']:
-                season_name = season['value']
-                season_id = season['slug']
-                season_dict[season_name] = season_id
-                if season_name not in self.nfln_seasons:
-                    self.nfln_seasons.append(season_name)
-            show_dict[show['title']] = season_dict
-        self.nfln_shows.update(show_dict)
+    #     for show in response['modules']['programs']:
+    #         season_dict = {}
+    #         for season in show['seasons']:
+    #             season_name = season['value']
+    #             season_id = season['slug']
+    #             season_dict[season_name] = season_id
+    #             if season_name not in self.nfln_seasons:
+    #                 self.nfln_seasons.append(season_name)
+    #         show_dict[show['title']] = season_dict
+    #     self.nfln_shows.update(show_dict)
 
     def get_shows(self, season):
         """Return a list of all shows for a season."""
@@ -358,24 +343,24 @@ class pigskin(object):
 
         return sorted(seasons_shows)
 
-    def get_shows_episodes(self, show_name, season=None):
-        """Return a list of episodes for a show. Return empty list if none are
-        found or if an error occurs."""
-        url = self.config['modules']['API']['NETWORK_PROGRAMS']
-        programs = self.make_request(url, 'get')['modules']['programs']
-        for show in programs:
-            if show_name == show['title']:
-                selected_show = show
-                break
-        season_slug = [x['slug'] for x in selected_show['seasons'] if season == x['value']][0]
-        request_url = self.config['modules']['API']['NETWORK_EPISODES']
-        episodes_url = request_url.replace(':seasonSlug', season_slug).replace(':tvShowSlug', selected_show['slug'])
-        episodes_data = self.make_request(episodes_url, 'get')['modules']['archive']['content']
-        for episode in episodes_data:
-            if not episode['videoThumbnail']['templateUrl']:  # set programs thumbnail as episode thumbnail
-                episode['videoThumbnail']['templateUrl'] = [x['thumbnail']['templateUrl'] for x in programs if x['slug'] == episode['nflprogram']][0]
+    # def get_shows_episodes(self, show_name, season=None):
+    #     """Return a list of episodes for a show. Return empty list if none are
+    #     found or if an error occurs."""
+    #     url = self.config['modules']['API']['NETWORK_PROGRAMS']
+    #     programs = self.make_request(url, 'get')['modules']['programs']
+    #     for show in programs:
+    #         if show_name == show['title']:
+    #             selected_show = show
+    #             break
+    #     season_slug = [x['slug'] for x in selected_show['seasons'] if season == x['value']][0]
+    #     request_url = self.config['modules']['API']['NETWORK_EPISODES']
+    #     episodes_url = request_url.replace(':seasonSlug', season_slug).replace(':tvShowSlug', selected_show['slug'])
+    #     episodes_data = self.make_request(episodes_url, 'get')['modules']['archive']['content']
+    #     for episode in episodes_data:
+    #         if not episode['videoThumbnail']['templateUrl']:  # set programs thumbnail as episode thumbnail
+    #             episode['videoThumbnail']['templateUrl'] = [x['thumbnail']['templateUrl'] for x in programs if x['slug'] == episode['nflprogram']][0]
 
-        return episodes_data
+    #     return episodes_data
 
     def parse_datetime(self, date_string, localize=False):
         """Parse NFL Game Pass date string to datetime object."""
