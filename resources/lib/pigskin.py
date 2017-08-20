@@ -245,30 +245,30 @@ class pigskin(object):
 
         return sorted(games, key=lambda x: x['dateTimeGMT'])
 
-    def has_coaches_tape(self, game_id, season):
-        """Return whether coaches tape is available for a given game."""
-        url = self.config['modules']['ROUTES_DATA_PROVIDERS']['game_page'].replace(':season', season).replace(':gameslug', game_id)
-        response = self.make_request(url, 'get')
-        coaches_tape = response['modules']['singlegame']['content'][0]['coachfilmVideo']
-        if coaches_tape:
-            self.log('Coaches Tape found.')
-            return coaches_tape['videoId']
-        else:
-            self.log('No Coaches Tape found for this game.')
-            return False
+    # def has_coaches_tape(self, game_id, season):
+    #     """Return whether coaches tape is available for a given game."""
+    #     url = self.config['modules']['ROUTES_DATA_PROVIDERS']['game_page'].replace(':season', season).replace(':gameslug', game_id)
+    #     response = self.make_request(url, 'get')
+    #     coaches_tape = response['modules']['singlegame']['content'][0]['coachfilmVideo']
+    #     if coaches_tape:
+    #         self.log('Coaches Tape found.')
+    #         return coaches_tape['videoId']
+    #     else:
+    #         self.log('No Coaches Tape found for this game.')
+    #         return False
 
 
-    def has_condensed_game(self, game_id, season):
-        """Return whether condensed game version is available."""
-        url = self.config['modules']['ROUTES_DATA_PROVIDERS']['game_page'].replace(':season', season).replace(':gameslug', game_id)
-        response = self.make_request(url, 'get')
-        condensed = response['modules']['singlegame']['content'][0]['condensedVideo']
-        if condensed:
-            self.log('Condensed game found.')
-            return condensed['videoId']
-        else:
-            self.log('No condensed version was found for this game.')
-            return False
+    # def has_condensed_game(self, game_id, season):
+    #     """Return whether condensed game version is available."""
+    #     url = self.config['modules']['ROUTES_DATA_PROVIDERS']['game_page'].replace(':season', season).replace(':gameslug', game_id)
+    #     response = self.make_request(url, 'get')
+    #     condensed = response['modules']['singlegame']['content'][0]['condensedVideo']
+    #     if condensed:
+    #         self.log('Condensed game found.')
+    #         return condensed['videoId']
+    #     else:
+    #         self.log('No condensed version was found for this game.')
+    #         return False
 
     def get_stream(self, video_id, game_type=None, username=None):
         """Return the URL for a stream."""
