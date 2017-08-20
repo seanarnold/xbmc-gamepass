@@ -14,19 +14,22 @@ from datetime import datetime, timedelta
 import requests
 import m3u8
 
+import pdb
+
 class pigskin(object):
     def __init__(self, proxy_config, debug=False):
         self.debug = debug
-        self.base_url = 'https://www.nflgamepass.com'
+        self.base_url = 'https://gamepass.nfl.com'
         self.user_agent = 'Firefox'
         self.http_session = requests.Session()
         self.access_token = None
         self.refresh_token = None
-        self.config = self.make_request(self.base_url + '/api/en/content/v1/web/config', 'get')
-        self.client_id = self.config['modules']['API']['CLIENT_ID']
+        self.config = self.make_request(self.base_url + '/service/config?format=json&cameras=true', 'get')
+        self.api_url = self.config['services']['api']
+        # self.client_id = self.config['modules']['API']['CLIENT_ID']
         self.nfln_shows = {}
         self.nfln_seasons = []
-        self.parse_shows()
+        # self.parse_shows() TODO: Find source of these
 
         if proxy_config is not None:
             proxy_url = self.build_proxy_url(proxy_config)
@@ -133,19 +136,21 @@ class pigskin(object):
         """Blindly authenticate to Game Pass. Use has_subscription() to
         determine success.
         """
-        url = self.config['modules']['API']['LOGIN']
+        url = self.base_url + '/secure/authenticate'
         post_data = {
             'username': username,
             'password': password,
-            'client_id': self.client_id,
-            'grant_type': 'password'
+            'format': 'json',
+            'accesstoken': 'true'
         }
         data = self.make_request(url, 'post', payload=post_data)
-        self.access_token = data['access_token']
-        self.refresh_token = data['refresh_token']
-        self.check_for_subscription()
+        self.access_token = data['data']['accessToken']
+        subscription = data['data']['hasSubscription']
+        if subscription == 'true':
+            return True
 
-        return True
+        self.log('User does not have a subscription!')
+        raise
 
     def check_for_subscription(self):
         """Returns True if a subscription is detected. Raises error_unauthorised on failure."""
