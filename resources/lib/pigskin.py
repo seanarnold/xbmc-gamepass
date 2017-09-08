@@ -13,14 +13,15 @@ from datetime import datetime, timedelta
 
 import requests
 import m3u8
-
-import pdb
+# import pdb
 
 class pigskin(object):
     def __init__(self, proxy_config, debug=False):
         self.debug = debug
         self.base_url = 'https://gamepass.nfl.com'
-        self.user_agent = 'Firefox'
+        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; WOW64; rv:55.0) Gecko/20100101 Firefox/55.0"
+        # self.user_agent = 'Firefox'
+
         self.http_session = requests.Session()
         self.access_token = None
         self.refresh_token = None
@@ -148,18 +149,8 @@ class pigskin(object):
         subscription = data['data']['hasSubscription']
         if subscription == 'true':
             return True
-
         self.log('User does not have a subscription!')
         raise
-
-
-    # def check_for_subscription(self):
-    #     """Returns True if a subscription is detected. Raises error_unauthorised on failure."""
-    #     url = self.config['modules']['API']['USER_PROFILE']
-        # headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
-    #     self.make_request(url, 'get', headers=headers)
-
-    #     return True
 
     def refresh_tokens(self):
         return True
@@ -237,13 +228,17 @@ class pigskin(object):
             url = self.api_url + 'v1/schedule'
             headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
             games_data = self.make_request(url, 'get', params=params, headers=headers)
-            pdb.set_trace()
-            games = games_data['games']
+            # pdb.set_trace()
+            all_games_data = []
+            if games_data['games']:
+                all_games_data = games_data['games']
+            else:
+                self.log("we are screwed")
         except:
             self.log('Acquiring games data failed.')
             raise
 
-        return sorted(games, key=lambda x: x['dateTimeGMT'])
+        return sorted(all_games_data, key=lambda x: x['dateTimeGMT'])
 
     # def has_coaches_tape(self, game_id, season):
     #     """Return whether coaches tape is available for a given game."""
@@ -270,15 +265,15 @@ class pigskin(object):
     #         self.log('No condensed version was found for this game.')
     #         return False
 
-    def get_stream(self, video_id, game_type=None, username=None):
+    def get_stream(self, video_id, gs, game_type, game_version=None):
         """Return the URL for a stream."""
         self.refresh_tokens()
 
         post_data = {
             'id': video_id,
-            'gs': 3,
+            'gs': gs,
             'gt': 1,
-            'type': 'game',
+            'type': game_type,
             'format': 'json'
         }
 
@@ -286,35 +281,46 @@ class pigskin(object):
         url = self.api_url + 'v1/publishpoint'
         headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
         response = self.make_request(url, 'post', payload=post_data, headers=headers)
-        pdb.set_trace()
-        return self.parse_m3u8_manifest(response['path'])
+        # pdb.set_trace()
+        return self.parse_m3u8_manifest(response['path'], video_id, gs)
 
-    def parse_m3u8_manifest(self, manifest_url):
+    def get_key(self, url):
+        response = self.make_request(url, 'get')
+        self.log(url[:url.find(".net") + 4] + response[response.find("URI=") + 5 :response.find(".key") + 4])
+        self.make_request(url[:url.find(".net") + 4] + response[response.find("URI=") + 5 :response.find(".key") + 4], 'get')
+
+    def parse_m3u8_manifest(self, manifest_url, video_id, game_state):
         """Return the manifest URL along with its bitrate."""
+
         streams = {}
         m3u8_header = {
             'Connection': 'keep-alive',
-            'User-Agent': self.user_agent
+            'User-Agent': self.user_agent,
         }
         streams['manifest_url'] = manifest_url + '|' + urllib.urlencode(m3u8_header)
         streams['bitrates'] = {}
         m3u8_manifest = self.make_request(manifest_url, 'get')
         m3u8_obj = m3u8.loads(m3u8_manifest)
-        pdb.set_trace()
+        # pdb.set_trace()
+
         for playlist in m3u8_obj.playlists:
             bitrate = int(playlist.stream_info.bandwidth) / 1000
-            streams['bitrates'][bitrate] = manifest_url[:manifest_url.rfind('/manifest') + 1] + playlist.uri + '?' + manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
-
+            if game_state == 1:
+                streams['bitrates'][bitrate] = manifest_url[:manifest_url.find('as/live/') + 8] + playlist.uri + '?' + manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
+            else:
+                streams['bitrates'][bitrate] = manifest_url[
+                                               :manifest_url.rfind('1_' + str(video_id))] + playlist.uri + '?' + \
+                                               manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
         return streams
 
-    # def redzone_on_air(self):
-    #     """Return whether RedZone Live is currently broadcasting."""
-    #     url = self.config['modules']['ROUTES_DATA_PROVIDERS']['redzone']
-    #     response = self.make_request(url, 'get')
-    #     if not response['modules']['redZoneLive']['content']:
-    #         return False
-    #     else:
-    #         return True
+    def redzone_on_air(self):
+        """Return whether RedZone Live is currently broadcasting."""
+        url = self.config['modules']['ROUTES_DATA_PROVIDERS']['redzone']
+        response = self.make_request(url, 'get')
+        if not response['modules']['redZoneLive']['content']:
+            return False
+        else:
+            return True
 
     # def parse_shows(self):
     #     """Dynamically parse the NFL Network shows into a dict."""
@@ -364,7 +370,7 @@ class pigskin(object):
 
     def parse_datetime(self, date_string, localize=False):
         """Parse NFL Game Pass date string to datetime object."""
-        date_time_format = '%Y-%m-%dT%H:%M:%S.%fZ'
+        date_time_format = '%Y-%m-%dT%H:%M:%S.%f'
         datetime_obj = datetime(*(time.strptime(date_string, date_time_format)[0:6]))
         if localize:
             return self.utc_to_local(datetime_obj)
