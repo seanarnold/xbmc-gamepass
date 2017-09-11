@@ -159,7 +159,7 @@ class GamepassGUI(xbmcgui.WindowXML):
                 listitem.setProperty('is_game', 'true')
                 listitem.setProperty('is_show', 'false')
                 game_state = game['gameState']
-                if game_state == 3:
+                if game_state == 3 or game_state == 2:
                     # show game duration only if user wants to see it
                     if addon.getSetting('hide_game_length') == 'false':
                         dur = gp.parse_datetime(str(game['endDateTimeGMT']), True) - gp.parse_datetime(str(game['dateTimeGMT']), True)
@@ -246,10 +246,10 @@ class GamepassGUI(xbmcgui.WindowXML):
         hide_busy_dialog()
         self.list_refill = True
         playitem = xbmcgui.ListItem(path=url)
-        # if self.has_inputstream_adaptive and addon.getSetting('use_inputstream_adaptive') == 'true':
-        #     playitem.setProperty('inputstreamaddon', 'inputstream.adaptive')
-        #     playitem.setProperty('inputstream.adaptive.manifest_type', 'hls')
-        #     playitem.setProperty('inputstream.adaptive.stream_headers', url.split('|')[1])
+        if self.has_inputstream_adaptive and addon.getSetting('use_inputstream_adaptive') == 'true':
+            playitem.setProperty('inputstreamaddon', 'inputstream.adaptive')
+            playitem.setProperty('inputstream.adaptive.manifest_type', 'hls')
+            playitem.setProperty('inputstream.adaptive.stream_headers', url.split('|')[1])
         # gp.get_key(url)
         playitem.setProperty('IsPlayable', 'true')
         xbmc.Player().play(item=url, listitem=playitem)

@@ -27,6 +27,8 @@ class pigskin(object):
         self.refresh_token = None
         self.config = self.make_request(self.base_url + '/service/config?format=json&cameras=true', 'get')
         self.api_url = self.config['services']['api']
+        print '^^^^^^^^^^^^^^API_URL:'
+        print self.api_url
         # self.client_id = self.config['modules']['API']['CLIENT_ID']
         self.nfln_shows = {}
         self.nfln_seasons = []
@@ -308,8 +310,10 @@ class pigskin(object):
             if game_state == 1:
                 streams['bitrates'][bitrate] = manifest_url[:manifest_url.find('as/live/') + 8] + playlist.uri + '?' + manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
             else:
-                streams['bitrates'][bitrate] = manifest_url[
-                                               :manifest_url.rfind('1_' + str(video_id))] + playlist.uri + '?' + \
+                end_of_string_idx = manifest_url.rfind('mp4.m3u8')
+                new_temp_base_url = manifest_url[:end_of_string_idx]
+                new_base_url = new_temp_base_url[:new_temp_base_url.rfind('/') + 1]
+                streams['bitrates'][bitrate] = new_base_url + playlist.uri + '?' + \
                                                manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
         return streams
 
