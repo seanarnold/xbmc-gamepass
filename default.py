@@ -149,6 +149,7 @@ class GamepassGUI(xbmcgui.WindowXML):
         """Show games for a given season/week"""
         self.games_items = []
         games = gp.get_weeks_games(self.selected_season, self.selected_season_type, self.selected_week)
+        # addon_log('ALL GAMES: %s' % str(games))
         for game in games:
             if 'awayTeam' in game and 'homeTeam' in game:
                 game_id = '{0}-{1}-{2}'.format(game['awayTeam']["name"].lower(), game['homeTeam']["name"].lower(), str(game['id']))
@@ -200,6 +201,50 @@ class GamepassGUI(xbmcgui.WindowXML):
                 listitem.setProperty('game_info', game_info)
                 listitem.setProperty('away_thumb', 'http://i.nflcdn.com/static/site/7.4/img/logos/teams-matte-144x96/%s.png' % game['awayTeam']['code'])
                 listitem.setProperty('home_thumb', 'http://i.nflcdn.com/static/site/7.4/img/logos/teams-matte-144x96/%s.png' % game['homeTeam']['code'])
+                listitem.setProperty('is_channel', 'False')
+                self.games_items.append(listitem)
+            elif game['grouping'] == "redzone":
+                game_id = '{0}'.format(str(game['id']))
+                game_name_shrt = '[B]%s[/B] ' % (game['name'])
+                game_name_full = '[B]%s[/B] ' % (game['name'])
+                listitem = xbmcgui.ListItem(game_name_shrt, game_name_full)
+                game_state = game['gameState']
+                if game_state == 3 or game_state == 2:
+                    game_info = "Final"
+                else:
+                    if addon.getSetting('time_notation') == '0':  # 12-hour clock
+                        datetime_format = '%A, %b %d - %I:%M %p'
+                    else:  # 24-hour clock
+                        datetime_format = '%A, %b %d - %H:%M'
+
+                    datetime_obj = gp.parse_datetime(str(game['dateTimeGMT']), True)
+                    game_info = datetime_obj.strftime(datetime_format)
+                listitem.setProperty('is_game', 'true')
+                listitem.setProperty('is_show', 'false')
+                if game_state == 0:
+                    isPlayable = 'false'
+                    isBlackedOut = 'false'
+                    # assuming live is 1
+                elif game_state == 1:
+                    game_info += '[CR]» Live «'
+                    video_id = str(game['id'])
+                    isPlayable = 'true'
+                    isBlackedOut = 'false'
+                    listitem.setProperty('video_id', video_id)
+                    listitem.setProperty('game_versions', 'Live')
+                else:  # ONDEMAND
+                    video_id = str(game['id'])
+                    isPlayable = 'true'
+                    isBlackedOut = 'false'
+                    listitem.setProperty('video_id', video_id)
+                    listitem.setProperty('game_versions', 'Final')
+
+                listitem.setProperty('isPlayable', isPlayable)
+                listitem.setProperty('isBlackedOut', isBlackedOut)
+                listitem.setProperty('game_id', game_id)
+                listitem.setProperty('game_state', str(game_state))
+                listitem.setProperty('game_info', game_info)
+                listitem.setProperty('is_channel', 'True')
                 self.games_items.append(listitem)
         self.games_list.addItems(self.games_items)
 
@@ -250,9 +295,12 @@ class GamepassGUI(xbmcgui.WindowXML):
             playitem.setProperty('inputstreamaddon', 'inputstream.adaptive')
             playitem.setProperty('inputstream.adaptive.manifest_type', 'hls')
             playitem.setProperty('inputstream.adaptive.stream_headers', url.split('|')[1])
-        # gp.get_key(url)
-        playitem.setProperty('IsPlayable', 'true')
-        xbmc.Player().play(item=url, listitem=playitem)
+            playitem.setProperty('inputstream.adaptive.license_key', '|' + url.split('|')[1])
+            playitem.setProperty('IsPlayable', 'true')
+            xbmc.Player().play(item=url, listitem=playitem)
+        else:
+            playitem.setProperty('IsPlayable', 'true')
+            xbmc.Player().play(item=url, listitem=playitem)
 
     def init(self, level):
         if level == 'season':
@@ -302,7 +350,7 @@ class GamepassGUI(xbmcgui.WindowXML):
         """Returns a bitrate, while honoring the user's /preference/."""
         bitrate_setting = int(addon.getSetting('preferred_bitrate'))
         list_available_bitrates = available_bitrates.keys()
-        bitrate_values = [4500, 3000, 2400, 1600, 1200, 800, 400]
+        bitrate_values = [4500, 3000, 1600, 1200, 800, 400]
         if bitrate_setting == 0:  # 0 === "highest"
             if bitrate_values[0] in list_available_bitrates:
                 return bitrate_values[0]
@@ -364,7 +412,7 @@ class GamepassGUI(xbmcgui.WindowXML):
             }
         }
         # TODO:: remove later, no support for adaptive stream
-        return False
+        # return False
 
         response = xbmc.executeJSONRPC(json.dumps(payload))
         data = json.loads(response)
@@ -392,10 +440,10 @@ class GamepassGUI(xbmcgui.WindowXML):
                     stream_url = streams['bitrates'][int(bitrate)]
                 else:  # bitrate dialog was canceled
                     return None
-            return stream_url
         else:
             addon_log('streams dictionary was empty.')
             return False
+        return stream_url
 
     def onFocus(self, controlId):  # pylint: disable=invalid-name
         # save currently focused list
@@ -466,20 +514,22 @@ class GamepassGUI(xbmcgui.WindowXML):
 
                     self.display_weeks_games()
                 elif controlId == 230:  # game is clicked
-
                     selectedGame = self.games_list.getSelectedItem()
                     if selectedGame.getProperty('isPlayable') == 'true':
                         self.init('game/episode')
                         game_id = selectedGame.getProperty('game_id')
+                        is_channel = selectedGame.getProperty('is_channel')
                         game_state = int(selectedGame.getProperty('game_state'))
                         video_id = selectedGame.getProperty('video_id')
                         game_versions = selectedGame.getProperty('game_versions')
 
                         if 'Live' in game_versions:
-                            streams = gp.get_stream(video_id, game_state, 'game')
-                            print "LIVEEEEEEEEEEE streams: "
-                            print streams
-                            stream_url = self.select_stream_url(streams)
+                            if is_channel == 'True':
+                                streams = gp.parse_m3u8_manifest(video_id, 'channel', game_state)
+                            else:
+                                streams = gp.parse_m3u8_manifest(video_id, 'game', game_state )
+
+                            # stream_url = self.select_stream_url(streams)
                             # if 'Final' in selectedGame.getProperty('game_info'):
                             # game_version = self.select_version()
                             # if game_version == 'archive':
@@ -497,6 +547,8 @@ class GamepassGUI(xbmcgui.WindowXML):
                             #     condensed_id = gp.has_condensed_game(game_id, self.selected_season)
                             #
                             # game_version = self.select_version(game_versions)
+                            if not streams:
+                                xbmcgui.Dialog().ok("Request didn't go through, Please try again")
                             stream_url = self.select_stream_url(streams)
                             if stream_url:
                                 self.play_url(str(stream_url))
@@ -505,7 +557,7 @@ class GamepassGUI(xbmcgui.WindowXML):
                                 dialog.ok(language(30043), language(30045))
                         if "Final" in game_versions:
                             game_version = self.select_version()
-                            streams = gp.get_stream(video_id, game_state, 'game', game_version)
+                            streams = gp.parse_m3u8_manifest(video_id, 'game', game_state)
                             # print "streams: "
                             # print streams
                             # if game_version == 'condensed':
@@ -541,20 +593,20 @@ class GamepassGUI(xbmcgui.WindowXML):
                     elif episode_stream_url is False:
                         dialog = xbmcgui.Dialog()
                         dialog.ok(language(30043), language(30045))
-                elif controlId == 240:  # Live content (though not games)
+                if controlId == 240:  # Live content (though not games)
                     show_name = self.live_list.getSelectedItem().getLabel()
                     if show_name == 'NFL RedZone - Live':
-                        rz_stream_url = self.select_stream_url(gp.get_stream('redzone', username=username))
+                        rz_stream_url = self.select_stream_url(gp.parse_m3u8_manifest(2, 'redzone', 1))
                         if rz_stream_url:
                             self.play_url(rz_stream_url)
                         elif rz_stream_url is False:
                             dialog = xbmcgui.Dialog()
                             dialog.ok(language(30043), language(30045))
                     elif show_name == 'NFL Network - Live':
-                        game_version = self.select_version()
-                        streams = gp.get_stream('1', 1, 'channel')
-                        nfln_live_stream = self.select_stream_url(streams)
-                        # nfln_live_stream = self.select_stream_url(gp.get_stream('nfl_network', username=username))
+                        # game_version = self.select_version()
+                        # streams = gp.get_stream('1', 1, 'channel')
+                        # nfln_live_stream = self.select_stream_url(streams)
+                        nfln_live_stream = self.select_stream_url(gp.parse_m3u8_manifest(1, 'channel', 1))
                         if nfln_live_stream:
                             self.play_url(nfln_live_stream)
                         elif nfln_live_stream is False:

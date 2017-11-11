@@ -1,6 +1,7 @@
 """
 A Kodi-agnostic library for NFL Game Pass
 """
+
 import codecs
 import uuid
 import sys
@@ -10,7 +11,6 @@ import time
 import urllib
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
-
 import requests
 import m3u8
 # import pdb
@@ -19,7 +19,7 @@ class pigskin(object):
     def __init__(self, proxy_config, debug=False):
         self.debug = debug
         self.base_url = 'https://gamepass.nfl.com'
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; WOW64; rv:55.0) Gecko/20100101 Firefox/55.0"
+        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36"
         # self.user_agent = 'Firefox'
 
         self.http_session = requests.Session()
@@ -27,12 +27,18 @@ class pigskin(object):
         self.refresh_token = None
         self.config = self.make_request(self.base_url + '/service/config?format=json&cameras=true', 'get')
         self.api_url = self.config['services']['api']
-        print '^^^^^^^^^^^^^^API_URL:'
-        print self.api_url
         # self.client_id = self.config['modules']['API']['CLIENT_ID']
         self.nfln_shows = {}
         self.nfln_seasons = []
-        # self.parse_shows() TODO: Find source of these
+
+        self.category_base_url = "https://gamepass.nfl.com/category/"
+
+        #TODO:: find another way to get show names
+        self.show_names = ["a-football-life", "americas-game", "hard-knocks", "the-nfl-show",  "nfl-total-access", "sound-fx", "the-timeline", "top-100-players", "undrafted", "super-bowl-archives"]
+        self.get_as_json = "?format=json"
+
+        # self.parse_shows()
+
 
         if proxy_config is not None:
             proxy_url = self.build_proxy_url(proxy_config)
@@ -82,11 +88,10 @@ class pigskin(object):
         else:  # post
             req = self.http_session.post(url, params=params, data=payload, headers=headers)
         self.log('Response code: %s' % req.status_code)
-        self.log('Response: %s' % req.content)
-
+        # self.log('Response: %s' % req.content)
         return self.parse_response(req)
 
-    def parse_response(self, req):
+    def parse_response(self, req, get_headers=False):
         """Try to load JSON data into dict and raise potential errors."""
         try:
             response = json.loads(req.content)
@@ -98,7 +103,8 @@ class pigskin(object):
                 if key.lower() == 'message':
                     if response[key]: # raise all messages as GamePassError if message is not empty
                         raise self.GamePassError(response[key])
-
+        if get_headers:
+            return response, req.headers
         return response
 
     def build_proxy_url(self, config):
@@ -267,54 +273,54 @@ class pigskin(object):
     #         self.log('No condensed version was found for this game.')
     #         return False
 
-    def get_stream(self, video_id, gs, game_type, game_version=None):
-        """Return the URL for a stream."""
+    def parse_m3u8_manifest(self,video_id, stream_type, game_state):
+        """Return the manifest URL along with its bitrate."""
         self.refresh_tokens()
 
-        post_data = {
-            'id': video_id,
-            'gs': gs,
-            'gt': 1,
-            'type': game_type,
-            'format': 'json'
-        }
-
-        # https://gamepass.nfl.com/service/publishpoint
         url = self.api_url + 'v1/publishpoint'
+        post_data = {'id': video_id, 'type': stream_type, 'gs': game_state, 'format': 'json', 'gt': 1}
         headers = {'Authorization': 'Bearer {0}'.format(self.access_token)}
-        response = self.make_request(url, 'post', payload=post_data, headers=headers)
-        # pdb.set_trace()
-        return self.parse_m3u8_manifest(response['path'], video_id, gs)
-
-    def get_key(self, url):
-        response = self.make_request(url, 'get')
-        self.log(url[:url.find(".net") + 4] + response[response.find("URI=") + 5 :response.find(".key") + 4])
-        self.make_request(url[:url.find(".net") + 4] + response[response.find("URI=") + 5 :response.find(".key") + 4], 'get')
-
-    def parse_m3u8_manifest(self, manifest_url, video_id, game_state):
-        """Return the manifest URL along with its bitrate."""
+        m3u8_data = self.make_request(url=url, method='post', payload=post_data, headers=headers)
+        if not m3u8_data and not m3u8_data['path']:
+            return None
+        m3u8_url = m3u8_data['path']
 
         streams = {}
-        m3u8_header = {
-            'Connection': 'keep-alive',
-            'User-Agent': self.user_agent,
-        }
-        streams['manifest_url'] = manifest_url + '|' + urllib.urlencode(m3u8_header)
         streams['bitrates'] = {}
-        m3u8_manifest = self.make_request(manifest_url, 'get')
-        m3u8_obj = m3u8.loads(m3u8_manifest)
-        # pdb.set_trace()
+        m3u8_manifest, res_headers = self.parse_response(self.http_session.get(m3u8_url), get_headers=True)
 
+        hdntl_cookie_to_end_line = res_headers['Set-Cookie'][res_headers['Set-Cookie'].find("hdntl"):]
+        hdntl_cookie = hdntl_cookie_to_end_line[:hdntl_cookie_to_end_line.find(";")]
+
+        nlqptid_cookie_to_end_line = res_headers['Set-Cookie'][res_headers['Set-Cookie'].find("nlqptid"):]
+        nlqptid_cookie = nlqptid_cookie_to_end_line[:nlqptid_cookie_to_end_line.find(";")]
+
+
+        m3u8_obj = m3u8.loads(m3u8_manifest)
         for playlist in m3u8_obj.playlists:
             bitrate = int(playlist.stream_info.bandwidth) / 1000
-            if game_state == 1:
-                streams['bitrates'][bitrate] = manifest_url[:manifest_url.find('as/live/') + 8] + playlist.uri + '?' + manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
+            if game_state == 1 or game_state == 2:
+                m3u8_header = {'Cookie': hdntl_cookie + ";" + nlqptid_cookie,
+                               'User-Agent': self.user_agent,
+                               'Accept-encoding': 'identity, gzip, deflate',
+                               'Connection': 'keep-alive',
+                               }
+                streams['manifest_url'] = m3u8_url + '|' + urllib.urlencode(m3u8_header)
+                streams['bitrates'][bitrate] = m3u8_url[:m3u8_url.find('as/live/') + 8] + playlist.uri + '?' + \
+                                               m3u8_url.split('?')[1]+ '|' + urllib.urlencode(m3u8_header)
+
             else:
-                end_of_string_idx = manifest_url.rfind('mp4.m3u8')
-                new_temp_base_url = manifest_url[:end_of_string_idx]
+                m3u8_header = {'Cookie': nlqptid_cookie,
+                               'User-Agent': self.user_agent,
+                               'Accept-encoding': 'identity, gzip, deflate',
+                               'Connection': 'keep-alive',
+                               }
+                streams['manifest_url'] = m3u8_url + '|' + urllib.urlencode(m3u8_header)
+                end_of_string_idx = m3u8_url.rfind('mp4.m3u8')
+                new_temp_base_url = m3u8_url[:end_of_string_idx]
                 new_base_url = new_temp_base_url[:new_temp_base_url.rfind('/') + 1]
                 streams['bitrates'][bitrate] = new_base_url + playlist.uri + '?' + \
-                                               manifest_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
+                                               m3u8_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
         return streams
 
     def redzone_on_air(self):
@@ -326,28 +332,28 @@ class pigskin(object):
         else:
             return True
 
-    # def parse_shows(self):
-    #     """Dynamically parse the NFL Network shows into a dict."""
-    #     show_dict = {}
-    #     url = self.config['modules']['API']['NETWORK_PROGRAMS']
-    #     response = self.make_request(url, 'get')
+    def parse_shows(self):
+        """Dynamically parse the NFL Network shows into a dict."""
 
-    #     for show in response['modules']['programs']:
-    #         season_dict = {}
-    #         for season in show['seasons']:
-    #             season_name = season['value']
-    #             season_id = season['slug']
-    #             season_dict[season_name] = season_id
-    #             if season_name not in self.nfln_seasons:
-    #                 self.nfln_seasons.append(season_name)
-    #         show_dict[show['title']] = season_dict
-    #     self.nfln_shows.update(show_dict)
+        show_dict = {}
+        for show in self.show_names:
+            url = self.category_base_url + show + self.get_as_json
+            response = self.make_request(url, 'get')
+            # season_dict = {}
+            # for season in show['seasons']:
+            #     season_name = season['value']
+            #     season_id = season['slug']
+            #     season_dict[season_name] = season_id
+            #     if season_name not in self.nfln_seasons:
+            #         self.nfln_seasons.append(season_name)
+            # show_dict[show['title']] = season_dict
+        # self.nfln_shows.update(show_dict)
 
     def get_shows(self, season):
         """Return a list of all shows for a season."""
         seasons_shows = []
 
-        for show_name, show_codes in self.nfln_shows.items():
+        for show_name in self.show_names:
             if season in show_codes:
                 seasons_shows.append(show_name)
 
