@@ -244,7 +244,7 @@ class GamepassGUI(xbmcgui.WindowXML):
                 listitem.setProperty('game_id', game_id)
                 listitem.setProperty('game_state', str(game_state))
                 listitem.setProperty('game_info', game_info)
-                listitem.setProperty('is_channel', 'True')
+                listitem.setProperty('is_channel', 'False')
                 self.games_items.append(listitem)
         self.games_list.addItems(self.games_items)
 
