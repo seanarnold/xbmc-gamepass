@@ -39,7 +39,6 @@ class pigskin(object):
 
         # self.parse_shows()
 
-
         if proxy_config is not None:
             proxy_url = self.build_proxy_url(proxy_config)
             if proxy_url != '':
@@ -160,21 +159,24 @@ class pigskin(object):
         self.log('User does not have a subscription!')
         raise
 
-    def refresh_tokens(self):
-        return True
+    """Refreshes authorization tokens."""
+    def refresh_tokens(self, username, password):
         #  TODO, work out way to do this. Seems we need to register a device etc first.
 
-        # """Refreshes authorization tokens."""
-        # url = self.base_url + '/secure/authenticate'
-        # post_data = {
-        #     'token': self.access_token,
-        #     'format': 'json',
-        #     'accesstoken': 'true'
-        # }
-        # data = self.make_request(url, 'post', payload=post_data)
-        # pdb.set_trace()
-        # self.access_token = data['data']['accessToken']
-
+        url = self.base_url + '/secure/authenticate'
+        post_data = {
+            'username': username,
+            'password': password,
+            'format': 'json',
+            'accesstoken': 'true'
+        }
+        data = self.make_request(url, 'post', payload=post_data)
+        self.access_token = data['data']['accessToken']
+        # subscription = data['data']['hasSubscription']
+        # if subscription == 'true':
+        #     return True
+        # self.log('User does not have a subscription!')
+        #
         # return True
 
     def get_seasons_and_weeks(self):
@@ -273,9 +275,9 @@ class pigskin(object):
     #         self.log('No condensed version was found for this game.')
     #         return False
 
-    def parse_m3u8_manifest(self,video_id, stream_type, game_state):
+    def parse_m3u8_manifest(self,video_id, stream_type, game_state, game_dur, game_start ,username, password):
         """Return the manifest URL along with its bitrate."""
-        self.refresh_tokens()
+        self.refresh_tokens(username, password)
 
         url = self.api_url + 'v1/publishpoint'
         post_data = {'id': video_id, 'type': stream_type, 'gs': game_state, 'format': 'json', 'gt': 1}
@@ -305,6 +307,9 @@ class pigskin(object):
                                'Accept-encoding': 'identity, gzip, deflate',
                                'Connection': 'keep-alive',
                                }
+
+                if game_state == 2 and game_dur and game_start:
+                    m3u8_url = m3u8_url[:m3u8_url.find('pc.m3u8')] + 'pc_' + game_start + "_0" + game_dur + ".mp4.m3u8" + m3u8_url[m3u8_url.find('pc.m3u8') + 7:]
                 streams['manifest_url'] = m3u8_url + '|' + urllib.urlencode(m3u8_header)
                 streams['bitrates'][bitrate] = m3u8_url[:m3u8_url.find('as/live/') + 8] + playlist.uri + '?' + \
                                                m3u8_url.split('?')[1]+ '|' + urllib.urlencode(m3u8_header)
