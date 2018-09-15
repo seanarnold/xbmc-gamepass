@@ -13,15 +13,15 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import requests
 import m3u8
+
 # import pdb
 
 class pigskin(object):
     def __init__(self, proxy_config, debug=False):
         self.debug = debug
         self.base_url = 'https://gamepass.nfl.com'
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36"
-        # self.user_agent = 'Firefox'
-
+        self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.106 Safari/537.36"
+        self.cookies = []
         self.http_session = requests.Session()
         self.access_token = None
         self.refresh_token = None
@@ -90,7 +90,7 @@ class pigskin(object):
         # self.log('Response: %s' % req.content)
         return self.parse_response(req)
 
-    def parse_response(self, req, get_headers=False):
+    def parse_response(self, req):
         """Try to load JSON data into dict and raise potential errors."""
         try:
             response = json.loads(req.content)
@@ -102,8 +102,7 @@ class pigskin(object):
                 if key.lower() == 'message':
                     if response[key]: # raise all messages as GamePassError if message is not empty
                         raise self.GamePassError(response[key])
-        if get_headers:
-            return response, req.headers
+        self.parse_cookies(req)
         return response
 
     def build_proxy_url(self, config):
@@ -152,6 +151,7 @@ class pigskin(object):
             'accesstoken': 'true'
         }
         data = self.make_request(url, 'post', payload=post_data)
+        self.cookies = []
         self.access_token = data['data']['accessToken']
         subscription = data['data']['hasSubscription']
         if subscription == 'true':
@@ -277,7 +277,7 @@ class pigskin(object):
 
     def parse_m3u8_manifest(self,video_id, stream_type, game_state, game_dur, game_start ,username, password):
         """Return the manifest URL along with its bitrate."""
-        self.refresh_tokens(username, password)
+        # self.refresh_tokens(username, password)
 
         url = self.api_url + 'v1/publishpoint'
         post_data = {'id': video_id, 'type': stream_type, 'gs': game_state, 'format': 'json', 'gt': 1}
@@ -289,43 +289,30 @@ class pigskin(object):
 
         streams = {}
         streams['bitrates'] = {}
-        m3u8_manifest, res_headers = self.parse_response(self.http_session.get(m3u8_url), get_headers=True)
-
-        hdntl_cookie_to_end_line = res_headers['Set-Cookie'][res_headers['Set-Cookie'].find("hdntl"):]
-        hdntl_cookie = hdntl_cookie_to_end_line[:hdntl_cookie_to_end_line.find(";")]
-
-        nlqptid_cookie_to_end_line = res_headers['Set-Cookie'][res_headers['Set-Cookie'].find("nlqptid"):]
-        nlqptid_cookie = nlqptid_cookie_to_end_line[:nlqptid_cookie_to_end_line.find(";")]
-
+        m3u8_manifest = self.make_request(url=m3u8_url, method='get')
 
         m3u8_obj = m3u8.loads(m3u8_manifest)
         for playlist in m3u8_obj.playlists:
             bitrate = int(playlist.stream_info.bandwidth) / 1000
             if game_state == 1 or game_state == 2:
-                m3u8_header = {'Cookie': hdntl_cookie + ";" + nlqptid_cookie,
+                m3u8_header = {'Cookie': ";".join(self.cookies),
                                'User-Agent': self.user_agent,
-                               'Accept-encoding': 'identity, gzip, deflate',
-                               'Connection': 'keep-alive',
                                }
 
                 if game_state == 2 and game_dur and game_start:
                     m3u8_url = m3u8_url[:m3u8_url.find('pc.m3u8')] + 'pc_' + game_start + "_0" + game_dur + ".mp4.m3u8" + m3u8_url[m3u8_url.find('pc.m3u8') + 7:]
                 streams['manifest_url'] = m3u8_url + '|' + urllib.urlencode(m3u8_header)
-                streams['bitrates'][bitrate] = m3u8_url[:m3u8_url.find('as/live/') + 8] + playlist.uri + '?' + \
-                                               m3u8_url.split('?')[1]+ '|' + urllib.urlencode(m3u8_header)
+                streams['bitrates'][bitrate] = m3u8_url[:m3u8_url.find('as/live/') + 8] + playlist.uri + '|' + urllib.urlencode(m3u8_header)
 
             else:
-                m3u8_header = {'Cookie': nlqptid_cookie,
+                m3u8_header = {'Cookie': ";".join(self.cookies),
                                'User-Agent': self.user_agent,
-                               'Accept-encoding': 'identity, gzip, deflate',
-                               'Connection': 'keep-alive',
                                }
                 streams['manifest_url'] = m3u8_url + '|' + urllib.urlencode(m3u8_header)
                 end_of_string_idx = m3u8_url.rfind('mp4.m3u8')
                 new_temp_base_url = m3u8_url[:end_of_string_idx]
                 new_base_url = new_temp_base_url[:new_temp_base_url.rfind('/') + 1]
-                streams['bitrates'][bitrate] = new_base_url + playlist.uri + '?' + \
-                                               m3u8_url.split('?')[1] + '|' + urllib.urlencode(m3u8_header)
+                streams['bitrates'][bitrate] = new_base_url + playlist.uri + '|' + urllib.urlencode(m3u8_header)
         return streams
 
     def redzone_on_air(self):
@@ -382,6 +369,13 @@ class pigskin(object):
     #             episode['videoThumbnail']['templateUrl'] = [x['thumbnail']['templateUrl'] for x in programs if x['slug'] == episode['nflprogram']][0]
 
     #     return episodes_data
+
+    def parse_cookies(self, r):
+        for cookie in r.cookies:
+            cookie_to_add = cookie.name + '=' + cookie.value
+            if cookie_to_add not in self.cookies:
+                self.cookies.append(cookie_to_add)
+
 
     def parse_datetime(self, date_string, localize=False):
         """Parse NFL Game Pass date string to datetime object."""
