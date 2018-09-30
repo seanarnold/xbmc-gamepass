@@ -296,14 +296,15 @@ class pigskin(object):
 
         m3u8_manifest = self.make_request(url=m3u8_url, method='get')
         m3u8_obj = m3u8.loads(m3u8_manifest)
+        m3u8_header = {'Cookie': ";".join(self.cookies),
+                       'User-Agent': self.user_agent,
+                       }
         for playlist in m3u8_obj.playlists:
             bitrate = int(playlist.stream_info.bandwidth) / 1000
             if game_state == 1 or game_state == 2:
 
                 if game_state == 2 and game_dur and game_start:
-                    m3u8_header = {'Cookie': ";".join(self.cookies),
-                                   'User-Agent': self.user_agent,
-                                   }
+
                     m3u8_url = m3u8_url[:m3u8_url.find('hd_pc') + 5] + "_" + game_start + "_0" + game_dur + ".mp4.m3u8" + m3u8_url[m3u8_url.find('.m3u8') + 5:] + '|' + urllib.urlencode(m3u8_header)
                     streams['manifest_url'] = m3u8_url + '|' + urllib.urlencode(m3u8_header)
                     streams['bitrates'][bitrate] = m3u8_url[:m3u8_url.find(
@@ -313,9 +314,6 @@ class pigskin(object):
                     streams['bitrates'][bitrate] = m3u8_url[:m3u8_url.find('as/live/') + 8] + playlist.uri + '|' + urllib.urlencode(m3u8_header)
 
             else:
-                m3u8_header = {'Cookie': ";".join(self.cookies),
-                               'User-Agent': self.user_agent,
-                               }
                 streams['manifest_url'] = m3u8_url + '|' + urllib.urlencode(m3u8_header)
                 end_of_string_idx = m3u8_url.rfind('mp4.m3u8')
                 new_temp_base_url = m3u8_url[:end_of_string_idx]
